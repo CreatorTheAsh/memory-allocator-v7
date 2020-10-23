@@ -1,11 +1,12 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #define MEM_SIZE 1024
 
 
 static char virtual_memory[MEM_SIZE];
 static void* START;
-static size_t SIZE = 812;
+static size_t SIZE = 1000;
 
 #pragma pack(push, 1)
 typedef struct header
@@ -16,6 +17,12 @@ typedef struct header
 } header_t;
 #pragma pack(pop)
 static int HEADER_SIZE = sizeof(header_t);
+
+
+size_t alignment(size_t size)
+{
+	return	size = size + 4 - size % 4;
+}
 
 size_t get_prev_size(void* ptr)
 {
@@ -103,9 +110,8 @@ void unit_headers(void* ptr1, void* ptr2)
 
 void* get_free_block(size_t size)
 {
-	//Алгоритм управления памятью TLSF
-	//Появился перевод описания алгоритма управления памятью TLSF. 
-	//Данный алгоритм характерен тем, что эффективность его O(1) и использует он стратегию выделения памяти "хорошо подходящими" (good-fit) блоками. 
+	//РђР»РіРѕСЂРёС‚Рј СѓРїСЂР°РІР»РµРЅРёСЏ РїР°РјСЏС‚СЊСЋ TLSF (Two-Level Segregated Fit)
+	//Р”Р°РЅРЅС‹Р№ Р°Р»РіРѕСЂРёС‚Рј С…Р°СЂР°РєС‚РµСЂРµРЅ С‚РµРј, С‡С‚Рѕ СЌС„С„РµРєС‚РёРІРЅРѕСЃС‚СЊ РµРіРѕ O(1) Рё РёСЃРїРѕР»СЊР·СѓРµС‚ РѕРЅ СЃС‚СЂР°С‚РµРіРёСЋ РІС‹РґРµР»РµРЅРёСЏ РїР°РјСЏС‚Рё "С…РѕСЂРѕС€Рѕ РїРѕРґС…РѕРґСЏС‰РёРјРё" (good-fit) Р±Р»РѕРєР°РјРё. 
 	void* cursor = START;
 	void* best = nullptr;
 	while (cursor != nullptr)
@@ -188,17 +194,17 @@ void* block(size_t size)
 
 	return pointer;
 }
-void mem_free(void* pointer)
+void mem_free(void* ptr)
 {
-	pointer = (uint8_t*)pointer - HEADER_SIZE;
-	set_state(pointer, false);
-	if (get_next(pointer) != nullptr && get_state(get_next(pointer)) == 0)
+	ptr = (uint8_t*)ptr - HEADER_SIZE;
+	set_state(ptr, false);
+	if (get_next(ptr) != nullptr && get_state(get_next(ptr)) == 0)
 	{
-		unit_headers(pointer, get_next(pointer));
+		unit_headers(ptr, get_next(ptr));
 	}
-	if (get_prev(pointer) != nullptr && get_state(get_prev(pointer)) == 0)
+	if (get_prev(ptr) != nullptr && get_state(get_prev(ptr)) == 0)
 	{
-		unit_headers(get_prev(pointer), pointer);
+		unit_headers(get_prev(ptr), ptr);
 	}
 }
 
@@ -206,64 +212,57 @@ void* mem_alloc(size_t size)
 {
 	if (size % 4 != 0) //align 4 bytes
 	{
-		size = size - size % 4 + 4;
+		size = alignment(size);
 	}
-	void* pointer = get_free_block(size);
-	if (pointer == nullptr)
+	void* ptr = get_free_block(size);
+	if (ptr == nullptr)
 	{
-		return pointer; // no enough memory
+		return ptr; // no enough memory
 	}
 
-	if (get_size(pointer) > size + HEADER_SIZE) // if can make it smallet
+	if (get_size(ptr) > size + HEADER_SIZE) // if can make it smaller
 	{
-		build_header((uint8_t*)pointer + size + HEADER_SIZE, 0, size, get_size(pointer) - size - HEADER_SIZE);
-		set_size(pointer, size);
+		build_header((uint8_t*)ptr + size + HEADER_SIZE, 0, size, get_size(ptr) - size - HEADER_SIZE);
+		set_size(ptr, size);
 	}
-	set_state(pointer, true);
-	return (uint8_t*)pointer + HEADER_SIZE;
+	set_state(ptr, true);
+	return (uint8_t*)ptr + HEADER_SIZE;
 }
 
-void* mem_realloc(void* pointer, size_t size)
+void* mem_realloc(void* ptr, size_t size)
 {
-	pointer = (uint8_t*)pointer - HEADER_SIZE;
+	ptr = (uint8_t*)ptr - HEADER_SIZE;
 	if (size % 4 != 0)
 	{
-		size = size - size % 4 + 4;
+		size = alignment(size);
 	}
 
-	if (get_size(pointer) == size)
+	if (get_size(ptr) == size)
 	{
-		return pointer;
+		return ptr;
 	}
 
-	if (get_size(pointer) > size) // if block has more memory then it had
+	if (get_size(ptr) > size) // if block has more memory then it need
 	{
-		if (get_size(pointer) - size - HEADER_SIZE >= 0) // block size > header size
+		if (get_size(ptr) - size - HEADER_SIZE >= 0) // block size > header size
 		{
-			build_header((uint8_t*)pointer + size + HEADER_SIZE, false, size, get_size(pointer) - size -
+			build_header((uint8_t*)ptr + size + HEADER_SIZE, false, size, get_size(ptr) - size -
 				HEADER_SIZE);
-			set_size(pointer, size);
-			if (get_next(get_next(pointer)) != nullptr &&
-				get_state(get_next(get_next(pointer))) == 0)
+			set_size(ptr, size);
+			if (get_next(get_next(ptr)) != nullptr &&
+				get_state(get_next(get_next(ptr))) == 0)
 			{
-				unit_headers(get_next(pointer), get_next(get_next(pointer)));
+				unit_headers(get_next(ptr), get_next(get_next(ptr)));
 			}
 		}
-		return pointer;
+		//memcpy()
+		return ptr;
 	}
-
-	if (get_next(pointer) != nullptr && get_size(pointer) + get_size(get_next(pointer)) >= size)
+	if (get_next(ptr) != nullptr && get_state(get_next(ptr)) == 0 &&
+		get_size(ptr) + get_size(get_next(ptr)) + HEADER_SIZE >= size)
 	{
-		build_header((uint8_t*)pointer + size + HEADER_SIZE, false, size, get_size(get_next(pointer)) - (size - get_size(pointer)));
-		set_size(pointer, size);
-		return pointer;
-	}
-
-	if (get_next(pointer) != nullptr && get_state(get_next(pointer)) == 0 &&
-		get_size(pointer) + get_size(get_next(pointer)) + HEADER_SIZE >= size)
-	{
-		set_size(pointer, get_size(pointer) + get_size(get_next(pointer)) + HEADER_SIZE);
-		return pointer;
+		set_size(ptr, get_size(ptr) + get_size(get_next(ptr)) + HEADER_SIZE);
+		return ptr;
 	}
 
 	void* best = mem_alloc(size);
@@ -271,7 +270,8 @@ void* mem_realloc(void* pointer, size_t size)
 	{
 		return best;
 	}
-	mem_free((uint8_t*)pointer + HEADER_SIZE);
+	memcpy(best, ptr, get_size(ptr));//copy from to data-block
+	mem_free((uint8_t*)ptr + HEADER_SIZE);
 	return best;
 }
 
@@ -279,9 +279,9 @@ int main()
 {
 	START = block(SIZE);
 	mem_dump();
-	void* x1 = mem_alloc(40);	//try allocate
+	void* x1 = mem_alloc(400);	//try allocate
 	mem_dump();
-	mem_realloc(x1, 120);		//try reallocate
+	mem_realloc(x1, 350);		//try reallocate
 	mem_dump();
 	mem_free(x1);				//try free
 	mem_dump();
@@ -304,6 +304,8 @@ int main()
 	mem_free(inptrs[2]);
 	mem_dump();
 	mem_free(inptrs[0]);
+	mem_dump();
+	mem_free(inptrs[4]);
 	mem_dump();
 	return 0;
 }
